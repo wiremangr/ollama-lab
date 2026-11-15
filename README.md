@@ -87,6 +87,13 @@ go build -o ollama-lab .
 
 💡 Keyboard Shortcuts
 
+
+
 ⚬ ⌘ + Enter: Instant prompt execution.
 ⚬ Escape: Immediate stream interruption / Stop.
 
+<img width="1392" height="994" alt="Single" src="https://github.com/user-attachments/assets/05801eb0-6f88-4f0d-abcb-04f1a65e9399" />
+
+<img width="1392" height="994" alt="AB-Compare" src="https://github.com/user-attachments/assets/da67d96a-34ee-451f-8742-3762f4aaacba" />
+
+<img width="1392" height="994" alt="Channel" src="https://github.com/user-attachments/assets/76249331-07a9-4a3b-95ee-58c6295b2f63" />
