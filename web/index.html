@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ollama Lab</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body class="dark-theme">
+  <!-- App Container -->
+  <div class="app-container">
+    
+    <!-- Top Bar Navigation -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo-icon">🧪</span>
+        <span class="brand-name">Ollama Lab</span>
+        <span class="badge version-badge">macOS</span>
+      </div>
+
+      <nav class="mode-tabs">
+        <button id="tab-single" class="tab-btn active" onclick="switchMode('single')">
+          <span class="tab-icon">⚡</span> Single Test
+        </button>
+        <button id="tab-compare" class="tab-btn" onclick="switchMode('compare')">
+          <span class="tab-icon">⚖️</span> A/B Compare
+        </button>
+        <button id="tab-channel" class="tab-btn" onclick="switchMode('channel')">
+          <span class="tab-icon">🎙️</span> Channel
+        </button>
+      </nav>
+
+      <div class="topbar-status">
+        <button id="theme-toggle-btn" class="theme-toggle-btn" onclick="toggleTheme()" title="Toggle Dark/Light Mode">
+          <span id="theme-icon">☀️</span>
+          <span id="theme-label">Light</span>
+        </button>
+        <div id="ollama-status" class="status-indicator checking">
+          <span class="status-dot"></span>
+          <span id="status-text">Checking Ollama...</span>
+        </div>
+        <button class="icon-btn" onclick="checkStatus()" title="Refresh Status">🔄</button>
+      </div>
+    </header>
+
+    <!-- Ollama Offline Warning Banner (hidden when connected) -->
+    <div id="offline-banner" class="banner warning hidden">
+      <div class="banner-content">
+        ⚠️ <strong>Ollama is not running or unreachable at <span id="banner-url">http://127.0.0.1:11434</span>.</strong>
+        <span>Please start Ollama via <code>open -a Ollama</code> or <code>ollama serve</code> in your terminal.</span>
+      </div>
+      <button class="btn btn-sm btn-outline" onclick="checkStatus()">Retry Connection</button>
+    </div>
+
+    <!-- MAIN VIEW 1: SINGLE MODE -->
+    <main id="single-view" class="view-content active">
+      <!-- Left Sidebar: Controls & Parameters -->
+      <aside class="sidebar">
+        <div class="sidebar-section">
+          <div class="section-header">
+            <label class="section-title">Model</label>
+            <button class="btn-link" onclick="fetchModels()" title="Refresh models list">↻ Refresh</button>
+          </div>
+          <select id="single-model" class="select-input">
+            <option value="" disabled selected>Loading models...</option>
+          </select>
+          <div id="model-details-badge" class="model-meta"></div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="section-header">
+            <label class="section-title">System Prompt Preset</label>
+            <button class="btn-link" onclick="openSavePresetModal('single')">+ Save As</button>
+          </div>
+          <select id="single-preset" class="select-input" onchange="applyPreset('single')">
+            <option value="">Custom (Manual)</option>
+          </select>
+        </div>
+
+        <!-- Hyperparameters Accordion / Section -->
+        <div class="sidebar-section params-section">
+          <div class="section-header">
+            <label class="section-title">Parameters (Options)</label>
+            <button class="btn-link" onclick="resetParams('single')">Reset</button>
+          </div>
+
+          <!-- Model Thinking Toggle (DeepSeek-R1 / CoT) -->
+          <div class="param-group toggle-group">
+            <div class="param-header">
+              <span class="param-label" title="Controls thinking/reasoning for models like DeepSeek-R1 (think: true/false)">🧠 Model Thinking</span>
+              <label class="switch">
+                <input type="checkbox" id="single-think-toggle" checked onchange="onThinkToggle('single', this.checked)">
+                <span class="slider round"></span>
+              </label>
+            </div>
+            <div class="toggle-subtext">Reasoning Trace (DeepSeek-R1): <strong id="single-think-status" class="status-on">ON</strong></div>
+          </div>
+
+          <!-- num_ctx (Context Window) -->
+          <div class="param-group">
+            <div class="param-header">
+              <span class="param-label" title="num_ctx: Size of context window (in tokens)">Context Window (num_ctx)</span>
+              <span id="single-ctx-val" class="param-val">4096</span>
+            </div>
+            <div class="quick-chips">
+              <button type="button" class="chip" onclick="setParam('single', 'ctx', 2048)">2K</button>
+              <button type="button" class="chip active" onclick="setParam('single', 'ctx', 4096)">4K</button>
+              <button type="button" class="chip" onclick="setParam('single', 'ctx', 8192)">8K</button>
+              <button type="button" class="chip" onclick="setParam('single', 'ctx', 16384)">16K</button>
+              <button type="button" class="chip" onclick="setParam('single', 'ctx', 32768)">32K</button>
+            </div>
+            <input type="range" id="single-ctx-slider" min="512" max="32768" step="512" value="4096" oninput="onParamSlider('single', 'ctx', this.value)">
+          </div>
+
+          <!-- num_predict (Max Output Tokens) -->
+          <div class="param-group">
+            <div class="param-header">
+              <span class="param-label" title="num_predict: Maximum tokens to generate (-1 = unlimited)">Max Output (num_predict)</span>
+              <span id="single-predict-val" class="param-val">1024</span>
+            </div>
+            <div class="quick-chips">
+              <button type="button" class="chip" onclick="setParam('single', 'predict', 256)">256</button>
+              <button type="button" class="chip" onclick="setParam('single', 'predict', 512)">512</button>
+              <button type="button" class="chip active" onclick="setParam('single', 'predict', 1024)">1K</button>
+              <button type="button" class="chip" onclick="setParam('single', 'predict', 2048)">2K</button>
+              <button type="button" class="chip" onclick="setParam('single', 'predict', -1)">Max (-1)</button>
+            </div>
+            <input type="range" id="single-predict-slider" min="128" max="4096" step="128" value="1024" oninput="onParamSlider('single', 'predict', this.value)">
+          </div>
+
+          <!-- temperature -->
+          <div class="param-group">
+            <div class="param-header">
+              <span class="param-label" title="temperature: Randomness/creativity (0.0 deterministic, 1.0+ creative)">Temperature</span>
+              <span id="single-temp-val" class="param-val">0.70</span>
+            </div>
+            <input type="range" id="single-temp-slider" min="0.0" max="2.0" step="0.05" value="0.70" oninput="onParamSlider('single', 'temp', this.value)">
+            <div class="range-labels">
+              <span>Deterministic (0.0)</span>
+              <span>Balanced (0.7)</span>
+              <span>Creative (2.0)</span>
+            </div>
+          </div>
+
+          <!-- top_p & top_k in grid -->
+          <div class="params-grid">
+            <div class="param-group">
+              <div class="param-header">
+                <span class="param-label" title="top_p: Nucleus sampling cutoff">Top P</span>
+                <span id="single-topp-val" class="param-val">0.90</span>
+              </div>
+              <input type="range" id="single-topp-slider" min="0.1" max="1.0" step="0.05" value="0.90" oninput="onParamSlider('single', 'topp', this.value)">
+            </div>
+            <div class="param-group">
+              <div class="param-header">
+                <span class="param-label" title="top_k: Top-k filtering">Top K</span>
+                <span id="single-topk-val" class="param-val">40</span>
+              </div>
+              <input type="number" id="single-topk-input" class="number-input" min="1" max="100" value="40" oninput="onParamInput('single', 'topk', this.value)">
+            </div>
+          </div>
+
+          <!-- repeat_penalty & seed -->
+          <div class="params-grid">
+            <div class="param-group">
+              <div class="param-header">
+                <span class="param-label" title="repeat_penalty: Penalize repeating tokens">Repeat Penalty</span>
+                <span id="single-repeat-val" class="param-val">1.10</span>
+              </div>
+              <input type="range" id="single-repeat-slider" min="1.0" max="2.0" step="0.05" value="1.10" oninput="onParamSlider('single', 'repeat', this.value)">
+            </div>
+            <div class="param-group">
+              <div class="param-header">
+                <span class="param-label" title="seed: Random seed for reproducible generation">Seed (Opt.)</span>
+              </div>
+              <input type="number" id="single-seed-input" class="number-input" placeholder="Random" oninput="onParamInput('single', 'seed', this.value)">
+            </div>
+          </div>
+
+          <!-- keep_alive (Keep model in GPU memory) -->
+          <div class="param-group" style="margin-top: 8px;">
+            <div class="param-header">
+              <span class="param-label" title="keep_alive: How long the model stays in RAM/VRAM after a request. -1 keeps it loaded indefinitely for instant subsequent runs!">Keep-Alive (Stay in RAM)</span>
+              <span id="single-keepalive-val" class="param-val">5m</span>
+            </div>
+            <div class="quick-chips">
+              <button type="button" class="chip active" onclick="setKeepAlive('single', '5m')">5m (Def)</button>
+              <button type="button" class="chip" onclick="setKeepAlive('single', '15m')">15m</button>
+              <button type="button" class="chip" onclick="setKeepAlive('single', '30m')">30m</button>
+              <button type="button" class="chip" onclick="setKeepAlive('single', '1h')">1h</button>
+              <button type="button" class="chip" onclick="setKeepAlive('single', '-1')">Always (-1)</button>
+            </div>
+            <select id="single-keepalive-select" class="select-input select-sm" style="margin-top: 4px;" onchange="onKeepAliveSelect('single', this.value)">
+              <option value="5m" selected>5 minutes (Default)</option>
+              <option value="15m">15 minutes</option>
+              <option value="30m">30 minutes</option>
+              <option value="1h">1 hour</option>
+              <option value="24h">24 hours</option>
+              <option value="-1">Indefinite (-1, Keep loaded)</option>
+              <option value="0">Unload immediately (0)</option>
+            </select>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Center / Right Work Area -->
+      <section class="work-area">
+        <!-- System Prompt Box -->
+        <div class="prompt-box system-box">
+          <div class="box-header">
+            <span class="box-title">System Prompt</span>
+            <span class="char-count" id="single-system-count">0 chars</span>
+          </div>
+          <textarea id="single-system-prompt" class="prompt-textarea" rows="3" placeholder="Define model behavior, instructions, format constraints, persona..."></textarea>
+        </div>
+
+        <!-- User Prompt Box -->
+        <div class="prompt-box user-box">
+          <div class="box-header">
+            <span class="box-title">User Prompt / Test Input</span>
+            <div class="box-actions">
+              <button class="chip" onclick="insertSamplePrompt('Explain Goroutines and Channels in Go with a concise example.')">Go Concurrency</button>
+              <button class="chip" onclick="insertSamplePrompt('Convert this messy text into strict JSON with fields: name, age, city.')">JSON Extract</button>
+              <button class="chip" onclick="insertSamplePrompt('Review this code for edge cases and performance leaks: \nfunc Process(items []string) { ... }')">Code Review</button>
+            </div>
+          </div>
+          <textarea id="single-user-prompt" class="prompt-textarea" rows="4" placeholder="Enter your test prompt here... (Press ⌘+Enter to Run)"></textarea>
+          
+          <div class="action-bar">
+            <div class="left-actions">
+              <span class="shortcut-hint"><kbd>⌘</kbd> + <kbd>Enter</kbd> to execute</span>
+              <button type="button" id="single-think-pill" class="chip think-pill active" onclick="toggleThinkPill('single')" title="Click to toggle Model Thinking ON/OFF">🧠 Think: ON</button>
+              <label class="context-toggle" title="Include earlier prompts and replies in the next request">
+                <input type="checkbox" id="single-keep-context" onchange="setContextRetention('single', this.checked)">
+                <span>💬 Keep context</span>
+              </label>
+            </div>
+            <div class="right-actions">
+              <button id="single-stop-btn" class="btn btn-danger hidden" onclick="stopGeneration('single')">
+                ⏹ Stop
+              </button>
+              <button id="single-run-btn" class="btn btn-primary" onclick="runSingleTest()">
+                ▶ Run Test
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Metrics Dashboard Bar -->
+        <div id="single-metrics-bar" class="metrics-grid">
+          <div class="metric-card">
+            <span class="metric-label">⚡ Speed</span>
+            <span id="single-speed-metric" class="metric-value">-- <small>tok/s</small></span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">⏱️ Time to First Token</span>
+            <span id="single-ttft-metric" class="metric-value">-- <small>ms</small></span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">⏳ Total Duration</span>
+            <span id="single-duration-metric" class="metric-value">-- <small>s</small></span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">🔢 Output Tokens</span>
+            <span id="single-tokens-metric" class="metric-value">--</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">🧠 Prompt Eval</span>
+            <span id="single-prompt-speed-metric" class="metric-value">-- <small>tok/s</small></span>
+          </div>
+        </div>
+
+        <!-- Output Viewer -->
+        <div class="output-container">
+          <div class="output-header">
+            <div class="output-title">
+              <span>Assistant Response</span>
+              <span id="single-stream-badge" class="stream-badge hidden">Streaming...</span>
+            </div>
+            <div class="output-actions">
+              <button class="btn btn-xs btn-outline" onclick="copyOutput('single-output-text')">📋 Copy</button>
+              <button class="btn btn-xs btn-outline" onclick="clearOutput('single')">Clear</button>
+            </div>
+          </div>
+          <div id="single-output-text" class="output-body">
+            <span class="placeholder-text">Output will appear here in real time as tokens are generated...</span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- MAIN VIEW 2: A/B COMPARE MODE -->
+    <main id="compare-view" class="view-content">
+      <!-- Top Shared User Input -->
+      <section class="compare-input-section">
+        <div class="prompt-box user-box">
+          <div class="box-header">
+            <span class="box-title">Shared Test Input (Sent to both models simultaneously)</span>
+            <div class="action-bar-compact">
+              <button id="compare-stop-btn" class="btn btn-danger btn-sm hidden" onclick="stopCompare()">⏹ Stop Both</button>
+              <button id="compare-run-btn" class="btn btn-primary btn-sm" onclick="runCompareTest()">▶ Run A/B Comparison</button>
+            </div>
+          </div>
+          <textarea id="compare-user-prompt" class="prompt-textarea" rows="3" placeholder="Enter prompt to test on both Model A and Model B... (Press ⌘+Enter to Run)"></textarea>
+        </div>
+      </section>
+
+      <!-- Side-by-Side Columns -->
+      <div class="compare-columns">
+        <!-- COLUMN A -->
+        <div class="compare-column" id="col-a">
+          <div class="column-header">
+            <span class="col-tag tag-a">Candidate A</span>
+            <select id="compare-model-a" class="select-input select-sm"></select>
+          </div>
+
+          <div class="col-controls">
+            <div class="inline-params">
+              <label>ctx: <input type="number" id="compare-ctx-a" value="4096" class="mini-input"></label>
+              <label>predict: <input type="number" id="compare-predict-a" value="1024" class="mini-input"></label>
+              <label>temp: <input type="number" id="compare-temp-a" value="0.7" step="0.1" class="mini-input"></label>
+              <label title="Keep-Alive: How long model stays in GPU/RAM">RAM: 
+                <select id="compare-keepalive-a" class="mini-select">
+                  <option value="5m">5m</option>
+                  <option value="15m">15m</option>
+                  <option value="30m">30m</option>
+                  <option value="1h" selected>1h</option>
+                  <option value="-1">Always (-1)</option>
+                </select>
+              </label>
+              <label class="mini-toggle" title="Toggle Thinking for Candidate A">
+                <input type="checkbox" id="compare-think-a" checked>
+                <span class="mini-toggle-text">🧠 Think</span>
+              </label>
+              <label class="mini-toggle" title="Include Candidate A's earlier prompts and replies">
+                <input type="checkbox" id="compare-keep-context-a" onchange="setContextRetention('compareA', this.checked)">
+                <span class="mini-toggle-text">💬 Context</span>
+              </label>
+            </div>
+            <textarea id="compare-system-a" class="prompt-textarea mini-textarea" rows="2" placeholder="System Prompt A (optional)..."></textarea>
+          </div>
+
+          <div class="metrics-grid metrics-compact" id="metrics-a">
+            <div class="metric-card"><span class="metric-label">Speed</span><span id="metric-speed-a" class="metric-value">-- tok/s</span></div>
+            <div class="metric-card"><span class="metric-label">TTFT</span><span id="metric-ttft-a" class="metric-value">-- ms</span></div>
+            <div class="metric-card"><span class="metric-label">Tokens</span><span id="metric-tokens-a" class="metric-value">--</span></div>
+          </div>
+
+          <div class="output-container col-output">
+            <div class="output-header">
+              <span id="stream-badge-a" class="stream-badge hidden">Streaming A...</span>
+              <button class="btn btn-xs btn-outline" onclick="copyOutput('output-a')">📋 Copy</button>
+            </div>
+            <div id="output-a" class="output-body">
+              <span class="placeholder-text">Awaiting comparison test...</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- COLUMN B -->
+        <div class="compare-column" id="col-b">
+          <div class="column-header">
+            <span class="col-tag tag-b">Candidate B</span>
+            <select id="compare-model-b" class="select-input select-sm"></select>
+          </div>
+
+          <div class="col-controls">
+            <div class="inline-params">
+              <label>ctx: <input type="number" id="compare-ctx-b" value="4096" class="mini-input"></label>
+              <label>predict: <input type="number" id="compare-predict-b" value="1024" class="mini-input"></label>
+              <label>temp: <input type="number" id="compare-temp-b" value="0.7" step="0.1" class="mini-input"></label>
+              <label title="Keep-Alive: How long model stays in GPU/RAM">RAM: 
+                <select id="compare-keepalive-b" class="mini-select">
+                  <option value="5m">5m</option>
+                  <option value="15m">15m</option>
+                  <option value="30m">30m</option>
+                  <option value="1h" selected>1h</option>
+                  <option value="-1">Always (-1)</option>
+                </select>
+              </label>
+              <label class="mini-toggle" title="Toggle Thinking for Candidate B">
+                <input type="checkbox" id="compare-think-b" checked>
+                <span class="mini-toggle-text">🧠 Think</span>
+              </label>
+              <label class="mini-toggle" title="Include Candidate B's earlier prompts and replies">
+                <input type="checkbox" id="compare-keep-context-b" onchange="setContextRetention('compareB', this.checked)">
+                <span class="mini-toggle-text">💬 Context</span>
+              </label>
+            </div>
+            <textarea id="compare-system-b" class="prompt-textarea mini-textarea" rows="2" placeholder="System Prompt B (optional)..."></textarea>
+          </div>
+
+          <div class="metrics-grid metrics-compact" id="metrics-b">
+            <div class="metric-card"><span class="metric-label">Speed</span><span id="metric-speed-b" class="metric-value">-- tok/s</span></div>
+            <div class="metric-card"><span class="metric-label">TTFT</span><span id="metric-ttft-b" class="metric-value">-- ms</span></div>
+            <div class="metric-card"><span class="metric-label">Tokens</span><span id="metric-tokens-b" class="metric-value">--</span></div>
+          </div>
+
+          <div class="output-container col-output">
+            <div class="output-header">
+              <span id="stream-badge-b" class="stream-badge hidden">Streaming B...</span>
+              <button class="btn btn-xs btn-outline" onclick="copyOutput('output-b')">📋 Copy</button>
+            </div>
+            <div id="output-b" class="output-body">
+              <span class="placeholder-text">Awaiting comparison test...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- MAIN VIEW 3: CHANNEL MODE (Multi-Agent Discussion) -->
+    <main id="channel-view" class="view-content">
+      <div class="channel-layout">
+        <!-- Channel Top Configuration Bar -->
+        <section class="channel-toolbar">
+          <div class="toolbar-left">
+            <!-- Model Selection -->
+            <div class="toolbar-field">
+              <label class="field-label" for="channel-model">Channel Model:</label>
+              <select id="channel-model" class="select-input select-sm" onchange="syncAgentModels(this.value)">
+                <option value="" disabled selected>Loading models...</option>
+              </select>
+              <button class="btn-link" onclick="fetchModels()" title="Refresh models">↻</button>
+            </div>
+
+            <!-- Number of Rounds -->
+            <div class="toolbar-field">
+              <label class="field-label" for="channel-rounds" title="Number of speaking cycles before pausing for user input">Rounds:</label>
+              <input type="number" id="channel-rounds" min="1" max="10" value="1" class="mini-input round-input" onchange="updateChannelRoundInfo()">
+              <div class="quick-chips">
+                <button type="button" class="chip active" onclick="setChannelRounds(1)">1</button>
+                <button type="button" class="chip" onclick="setChannelRounds(2)">2</button>
+                <button type="button" class="chip" onclick="setChannelRounds(3)">3</button>
+              </div>
+            </div>
+
+            <!-- Turn Order -->
+            <div class="toolbar-field">
+              <label class="field-label" for="channel-order" title="Order in which agents take turns within each round">Agent Order:</label>
+              <select id="channel-order" class="select-input select-sm" onchange="updateChannelRoundInfo()">
+                <option value="forward" selected>1 ➔ 2 ➔ 3 (Forward)</option>
+                <option value="reverse">3 ➔ 2 ➔ 1 (Reverse)</option>
+                <option value="random">🎲 Random (No Repeat 1st)</option>
+              </select>
+            </div>
+
+            <!-- Thinking Toggle -->
+            <div class="toolbar-field">
+              <label class="mini-toggle" title="Toggle reasoning trace for models like DeepSeek-R1">
+                <input type="checkbox" id="channel-think-toggle" checked>
+                <span class="mini-toggle-text">🧠 Think</span>
+              </label>
+            </div>
+
+            <!-- RAM / Keep-Alive -->
+            <div class="toolbar-field">
+              <label class="field-label" for="channel-keepalive" title="Keep-Alive: Model stays in RAM/VRAM">RAM:</label>
+              <select id="channel-keepalive" class="mini-select">
+                <option value="5m">5m</option>
+                <option value="15m">15m</option>
+                <option value="30m">30m</option>
+                <option value="1h" selected>1h</option>
+                <option value="-1">Always (-1)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Quick Preset Templates -->
+          <div class="toolbar-right">
+            <span id="channel-active-count-badge" class="badge active-agents-badge">3/3 Active</span>
+            <span class="preset-label">Templates:</span>
+            <button class="chip" onclick="loadChannelTemplate('debate')">🎭 Debate</button>
+            <button class="chip" onclick="loadChannelTemplate('1v1')">⚔️ 1v1</button>
+            <button class="chip" onclick="loadChannelTemplate('codeteam')">💻 Code Team</button>
+            <button class="chip" onclick="loadChannelTemplate('dialectic')">🇬🇷 Διάλογος</button>
+            <button class="btn btn-xs btn-outline" onclick="addNewAgent()" title="Add another Agent">+ Agent</button>
+            <button class="btn btn-xs btn-outline" id="toggle-agents-panel-btn" onclick="toggleAgentsPanel()" title="Show/Hide Agents Configuration Panel">⚙️ Agents Setup ▾</button>
+          </div>
+        </section>
+
+        <!-- Agents Setup Panel (Collapsible) -->
+        <section id="channel-agents-panel" class="channel-agents-grid">
+          <!-- Agent 1 Card -->
+          <div class="agent-config-card agent-1-border" id="agent-card-1" data-agent-id="1">
+            <div class="agent-card-header">
+              <div class="agent-identity">
+                <label class="switch switch-sm agent-enable-switch" title="Enable/Disable Agent 1">
+                  <input type="checkbox" id="agent1-enabled" checked onchange="onAgentToggle(1, this.checked)">
+                  <span class="slider round"></span>
+                </label>
+                <span class="agent-badge badge-agent-1">1</span>
+                <input type="text" id="agent1-name" class="agent-name-input" value="Agent 1 (Architect)" oninput="updateActiveAgentsBadge()">
+              </div>
+              <div class="agent-header-actions">
+                <select id="agent1-model" class="mini-select agent-model-select" title="Specific model or inherit channel model">
+                  <option value="">(Inherit Model)</option>
+                </select>
+              </div>
+            </div>
+            <textarea id="agent1-prompt" class="prompt-textarea agent-textarea" rows="3" placeholder="Agent 1 System Prompt...">You are Agent 1 (Senior Architect). Provide deep, structural, and technical insights. State your perspective clearly and constructively challenge or build on other agents' points.</textarea>
+          </div>
+
+          <!-- Agent 2 Card -->
+          <div class="agent-config-card agent-2-border" id="agent-card-2" data-agent-id="2">
+            <div class="agent-card-header">
+              <div class="agent-identity">
+                <label class="switch switch-sm agent-enable-switch" title="Enable/Disable Agent 2">
+                  <input type="checkbox" id="agent2-enabled" checked onchange="onAgentToggle(2, this.checked)">
+                  <span class="slider round"></span>
+                </label>
+                <span class="agent-badge badge-agent-2">2</span>
+                <input type="text" id="agent2-name" class="agent-name-input" value="Agent 2 (Critic)" oninput="updateActiveAgentsBadge()">
+              </div>
+              <div class="agent-header-actions">
+                <select id="agent2-model" class="mini-select agent-model-select" title="Specific model or inherit channel model">
+                  <option value="">(Inherit Model)</option>
+                </select>
+              </div>
+            </div>
+            <textarea id="agent2-prompt" class="prompt-textarea agent-textarea" rows="3" placeholder="Agent 2 System Prompt...">You are Agent 2 (Devil's Advocate & Risk Auditor). Highlight potential pitfalls, hidden edge-cases, security vulnerabilities, or alternative paradigms. Question assumptions made by others.</textarea>
+          </div>
+
+          <!-- Agent 3 Card -->
+          <div class="agent-config-card agent-3-border" id="agent-card-3" data-agent-id="3">
+            <div class="agent-card-header">
+              <div class="agent-identity">
+                <label class="switch switch-sm agent-enable-switch" title="Enable/Disable Agent 3">
+                  <input type="checkbox" id="agent3-enabled" checked onchange="onAgentToggle(3, this.checked)">
+                  <span class="slider round"></span>
+                </label>
+                <span class="agent-badge badge-agent-3">3</span>
+                <input type="text" id="agent3-name" class="agent-name-input" value="Agent 3 (Synthesizer)" oninput="updateActiveAgentsBadge()">
+              </div>
+              <div class="agent-header-actions">
+                <select id="agent3-model" class="mini-select agent-model-select" title="Specific model or inherit channel model">
+                  <option value="">(Inherit Model)</option>
+                </select>
+              </div>
+            </div>
+            <textarea id="agent3-prompt" class="prompt-textarea agent-textarea" rows="3" placeholder="Agent 3 System Prompt...">You are Agent 3 (Synthesizer & Decision Maker). Listen closely to Agent 1 and Agent 2, mediate any disagreements, summarize trade-offs, and propose a balanced, pragmatic consensus.</textarea>
+          </div>
+        </section>
+
+        <!-- Channel Discussion Feed -->
+        <section class="channel-discussion-container">
+          <div class="channel-feed-header">
+            <div class="feed-title">
+              <span>Channel Discussion Stream</span>
+              <span id="channel-status-pill" class="status-pill idle">Idle</span>
+            </div>
+            <div class="feed-actions">
+              <button class="btn btn-xs btn-outline" onclick="copyChannelTranscript()">📋 Copy Transcript</button>
+              <button class="btn btn-xs btn-outline" onclick="clearChannel()">🗑️ Clear</button>
+            </div>
+          </div>
+
+          <div id="channel-chat-feed" class="channel-feed-body">
+            <div class="channel-empty-state">
+              <span class="empty-icon">🎙️</span>
+              <h3>Channel Multi-Agent Playground</h3>
+              <p>Type a topic or question below. The 3 agents will take turns discussing, analyzing, and building upon each other's ideas in real time.</p>
+            </div>
+          </div>
+          <button id="channel-scroll-bottom-btn" class="scroll-bottom-pill hidden" onclick="scrollChannelToBottom()">↓ Jump to Latest</button>
+        </section>
+
+        <!-- Channel User Input Bar -->
+        <section class="channel-input-bar">
+          <textarea id="channel-user-input" class="prompt-textarea channel-textarea" rows="2" placeholder="Write a topic or message to send to all 3 agents... (Press ⌘+Enter to start)"></textarea>
+          <div class="channel-input-actions">
+            <div class="input-hints">
+              <span class="shortcut-hint"><kbd>⌘</kbd> + <kbd>Enter</kbd> to Send</span>
+              <span id="channel-round-info" class="channel-round-info">1 cycle of turns per run</span>
+            </div>
+            <div class="channel-btn-group">
+              <button id="channel-stop-btn" class="btn btn-danger hidden" onclick="stopChannel()">⏹ Stop</button>
+              <button id="channel-run-btn" class="btn btn-primary" onclick="runChannelDiscussion()">▶ Start Discussion</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+  </div>
+
+  <!-- Save Preset Modal -->
+  <div id="preset-modal" class="modal-overlay hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 class="modal-title">Save System Prompt Preset</h3>
+        <button class="close-btn" onclick="closePresetModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="input-label">Preset Name</label>
+        <input type="text" id="preset-name-input" class="text-input" placeholder="e.g. Go Concurrency Master">
+        
+        <label class="input-label">Description (optional)</label>
+        <input type="text" id="preset-desc-input" class="text-input" placeholder="e.g. Strict architectural guidance with low temp">
+
+        <div class="preset-preview-label">Current System Prompt to Save:</div>
+        <div id="preset-prompt-preview" class="preset-preview-text"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closePresetModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="confirmSavePreset()">Save Preset</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

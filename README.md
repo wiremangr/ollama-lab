@@ -1,2 +1,92 @@
-# ollama-lab
-Ollama Lab: A lightweight macOS desktop app in Go for testing local Ollama models, A/B benchmarking, and multi-agent channel workflows.
+🧪 Ollama Lab (macOS Desktop App in Go)
+
+A standalone, lightweight macOS desktop application written in Go for testing local Ollama models, fine-tuning inference parameters (num_predict, num_ctx, temperature, top_p, seed), and real-time system prompt benchmarking.
+
+✨ Key Features
+
+1. Native macOS Window:
+  ⚬ Powered by built-in Apple frameworks (Cocoa & WebKit) via CGO, with zero dependency on Electron or Node.js.
+  ⚬ Tiny ~6MB binary size with minimal resource consumption.
+  ⚬ macOS dark-mode aesthetic with Apple SF Pro typography.
+2. Complete Inference Parameter Control:
+  ⚬ think (Model Thinking ON / OFF): Enable or disable reasoning / chain-of-thought processing for models like DeepSeek-R1. When ON, thoughts are rendered in a sleek collapsible accordion; when OFF, the model responds instantly without reasoning latency!
+  ⚬ keep_alive (Model in RAM): Configure how long the model stays loaded in GPU/RAM (5m, 15m, 30m, 1h, or Always / -1 to keep it warm indefinitely).
+  ⚬ num_ctx (Context Window): 2K, 4K, 8K, 16K, 32K or custom slider.
+  ⚬ num_predict (Max Output Tokens): 256, 512, 1K, 2K, Max (-1).
+  ⚬ temperature: 0.00 (Deterministic) to 2.00 (Creative).
+  ⚬ top_p & top_k: Fine-sampling controls.
+  ⚬ repeat_penalty: Prevent phrase repetition.
+  ⚬ seed: Fixed seed support for 100% reproducible tests.
+3. Dark & Light Mode:
+  ⚬ Quick toggle button (🌙 / ☀️) in the header.
+  ⚬ Automatic preference saving and synchronization with macOS system appearance.
+4. System Prompt Presets:
+  ⚬ Built-in presets: Senior Go Architect, Strict JSON Generator, Concise Expert, Code Reviewer, Greek Specialist.
+  ⚬ Custom preset saving and loading (~/.ollama-lab/presets.json).
+5. Real-time Telemetry & Metrics:
+  ⚬ ⚡ Tokens / sec (generation speed)
+  ⚬ ⏱️ Time to First Token (TTFT) (latency in milliseconds)
+  ⚬ ⏳ Total Generation Duration
+  ⚬ 🔢 Token Count (input vs output tokens)
+  ⚬ 🧠 Prompt Evaluation Speed
+6. A/B Compare Mode (Side-by-Side):
+  ⚬ Test the exact same prompt simultaneously across 2 different models or with different system prompts/parameters.
+  ⚬ Live parallel streaming to compare speed and response quality side-by-side.
+  ⚬ Default RAM (Keep-Alive): 1h setting for both candidates to keep them warm in memory.
+7. Single Test Context Retention (Interactive Chat):
+  ⚬ With Keep context enabled, questions and answers form a continuous chat thread with timestamps and metrics, making it easy to track conversation evolution.
+8. Channel Mode (Collaborative Multi-Agent Discussion):
+  ⚬ Unified environment featuring 3 AI Agents discussing, analyzing, and interacting with each other and the user in a shared channel.
+  ⚬ Model Selection: Global channel model with per-agent override capabilities.
+  ⚬ Customized System Prompts: Distinct roles per agent (e.g., Debate with Visionary / Skeptic / Pragmatist, Code Architecture Team, or Dialectical Reasoning).
+  ⚬ Shared History & Visibility: Every user message and agent response is injected into the context, instantly visible to all subsequent agents.
+  ⚬ Round Configuration: Set conversation cycles (1, 2, 3+ rounds) after which execution automatically pauses for user input.
+  ⚬ Turn Order Control:
+    ⚬ 1 ➔ 2 ➔ 3 (First to Third)
+    ⚬ 3 ➔ 2 ➔ 1 (Third to First)
+    ⚬ 🎲 Random (Randomized order ensuring the agent that spoke first in the current round never speaks first in the next round).
+9. Zero External Bloat:
+  ⚬ Built using only the Go Standard Library (net/http, embed, encoding/json) and native macOS Cocoa/WebKit frameworks.
+
+🚀 How to Run
+
+Option 1: Open as a macOS App
+
+Double-click Ollama Lab.app in Finder, or launch via terminal:
+
+cd path/to/ollama-lab
+open "Ollama Lab.app"
+
+
+Option 2: Run the Binary Directly
+
+cd path/to/ollama-lab
+./ollama-lab
+
+
+Option 3: Headless / Browser Mode (Optional)
+
+If you prefer running it solely as a local web server without a native window:
+
+./ollama-lab -no-window -port 8080
+
+
+Then open [http://127.0.0.1:8080](http://127.0.0.1:8080) in your favorite browser.
+
+🛠️ Rebuild & Packaging
+
+To rebuild the .app bundle:
+
+./build-app.sh
+
+
+Or a simple binary build:
+
+go build -o ollama-lab .
+
+
+💡 Keyboard Shortcuts
+
+⚬ ⌘ + Enter: Instant prompt execution.
+⚬ Escape: Immediate stream interruption / Stop.
+
