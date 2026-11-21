@@ -77,6 +77,14 @@
           </select>
         </div>
 
+        <div class="sidebar-section">
+          <div class="section-header">
+            <label class="section-title">Tools</label>
+            <span id="single-tools-count" class="tool-count-badge">0 enabled</span>
+          </div>
+          <button class="btn btn-sm btn-outline tool-config-btn" onclick="openToolsModal('single')">🛠️ Configure Tools</button>
+        </div>
+
         <!-- Hyperparameters Accordion / Section -->
         <div class="sidebar-section params-section">
           <div class="section-header">
@@ -297,6 +305,8 @@
           <div class="box-header">
             <span class="box-title">Shared Test Input (Sent to both models simultaneously)</span>
             <div class="action-bar-compact">
+              <span id="compare-tools-count" class="tool-count-badge">0 tools</span>
+              <button class="btn btn-outline btn-sm" onclick="openToolsModal('compare')" title="Configure enabled tools for A/B Compare">🛠️ Tools</button>
               <button id="compare-stop-btn" class="btn btn-danger btn-sm hidden" onclick="stopCompare()">⏹ Stop Both</button>
               <button id="compare-run-btn" class="btn btn-primary btn-sm" onclick="runCompareTest()">▶ Run A/B Comparison</button>
             </div>
@@ -445,6 +455,18 @@
               </select>
             </div>
 
+            <!-- History Window -->
+            <div class="toolbar-field">
+              <label class="field-label" for="channel-history-window" title="How many recent channel messages to send to agents. All = full history.">History:</label>
+              <select id="channel-history-window" class="select-input select-sm" onchange="updateChannelRoundInfo()">
+                <option value="all" selected>All</option>
+                <option value="6">Last 6</option>
+                <option value="10">Last 10</option>
+                <option value="20">Last 20</option>
+                <option value="40">Last 40</option>
+              </select>
+            </div>
+
             <!-- Thinking Toggle -->
             <div class="toolbar-field">
               <label class="mini-toggle" title="Toggle reasoning trace for models like DeepSeek-R1">
@@ -475,6 +497,7 @@
             <button class="chip" onclick="loadChannelTemplate('codeteam')">💻 Code Team</button>
             <button class="chip" onclick="loadChannelTemplate('dialectic')">🇬🇷 Διάλογος</button>
             <button class="btn btn-xs btn-outline" onclick="addNewAgent()" title="Add another Agent">+ Agent</button>
+            <button class="btn btn-xs btn-outline" onclick="openToolsModal('channel')" title="Configure enabled tools for Channel">🛠️ Tools</button>
             <button class="btn btn-xs btn-outline" id="toggle-agents-panel-btn" onclick="toggleAgentsPanel()" title="Show/Hide Agents Configuration Panel">⚙️ Agents Setup ▾</button>
           </div>
         </section>
@@ -498,6 +521,10 @@
                 </select>
               </div>
             </div>
+            <div class="agent-params-row">
+              <label class="agent-param" title="Context window for Agent 1">ctx <input type="number" id="agent1-ctx" class="mini-input agent-param-input" value="4096" min="512" step="512"></label>
+              <label class="agent-param" title="Max output tokens for Agent 1 (-1 = unlimited)">predict <input type="number" id="agent1-predict" class="mini-input agent-param-input" value="1024" min="-1" step="128"></label>
+            </div>
             <textarea id="agent1-prompt" class="prompt-textarea agent-textarea" rows="3" placeholder="Agent 1 System Prompt...">You are Agent 1 (Senior Architect). Provide deep, structural, and technical insights. State your perspective clearly and constructively challenge or build on other agents' points.</textarea>
           </div>
 
@@ -518,6 +545,10 @@
                 </select>
               </div>
             </div>
+            <div class="agent-params-row">
+              <label class="agent-param" title="Context window for Agent 2">ctx <input type="number" id="agent2-ctx" class="mini-input agent-param-input" value="4096" min="512" step="512"></label>
+              <label class="agent-param" title="Max output tokens for Agent 2 (-1 = unlimited)">predict <input type="number" id="agent2-predict" class="mini-input agent-param-input" value="1024" min="-1" step="128"></label>
+            </div>
             <textarea id="agent2-prompt" class="prompt-textarea agent-textarea" rows="3" placeholder="Agent 2 System Prompt...">You are Agent 2 (Devil's Advocate & Risk Auditor). Highlight potential pitfalls, hidden edge-cases, security vulnerabilities, or alternative paradigms. Question assumptions made by others.</textarea>
           </div>
 
@@ -537,6 +568,10 @@
                   <option value="">(Inherit Model)</option>
                 </select>
               </div>
+            </div>
+            <div class="agent-params-row">
+              <label class="agent-param" title="Context window for Agent 3">ctx <input type="number" id="agent3-ctx" class="mini-input agent-param-input" value="4096" min="512" step="512"></label>
+              <label class="agent-param" title="Max output tokens for Agent 3 (-1 = unlimited)">predict <input type="number" id="agent3-predict" class="mini-input agent-param-input" value="1024" min="-1" step="128"></label>
             </div>
             <textarea id="agent3-prompt" class="prompt-textarea agent-textarea" rows="3" placeholder="Agent 3 System Prompt...">You are Agent 3 (Synthesizer & Decision Maker). Listen closely to Agent 1 and Agent 2, mediate any disagreements, summarize trade-offs, and propose a balanced, pragmatic consensus.</textarea>
           </div>
@@ -582,6 +617,45 @@
       </div>
     </main>
 
+  </div>
+
+  <!-- Tools Configuration Modal -->
+  <div id="tools-modal" class="modal-overlay hidden">
+    <div class="modal-box tools-modal-box">
+      <div class="modal-header">
+        <div>
+          <h3 class="modal-title">🛠️ Tool Configuration</h3>
+          <div id="tools-modal-scope" class="modal-subtitle">Configure enabled tools</div>
+        </div>
+        <button class="close-btn" onclick="closeToolsModal()">✕</button>
+      </div>
+      <div class="modal-body tools-modal-body">
+        <div class="tools-pane">
+          <div class="tools-pane-header">
+            <span class="tools-pane-title">Available Tools</span>
+            <span id="tools-available-count" class="tools-pane-count">0</span>
+          </div>
+          <div id="tools-available-list" class="tools-list"></div>
+        </div>
+        <div class="tools-transfer-controls">
+          <button class="btn btn-sm btn-outline" onclick="moveSelectedTools('enable')" title="Enable selected">Add →</button>
+          <button class="btn btn-sm btn-outline" onclick="moveSelectedTools('disable')" title="Disable selected">← Remove</button>
+          <button class="btn btn-sm btn-outline" onclick="moveAllTools('enable')" title="Enable all">All →</button>
+          <button class="btn btn-sm btn-outline" onclick="moveAllTools('disable')" title="Disable all">← All</button>
+        </div>
+        <div class="tools-pane">
+          <div class="tools-pane-header">
+            <span class="tools-pane-title">Enabled Tools</span>
+            <span id="tools-enabled-count" class="tools-pane-count">0</span>
+          </div>
+          <div id="tools-enabled-list" class="tools-list"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <div id="tools-modal-hint" class="tools-modal-hint">Enabled tools are passed to the model for this view. Tool handlers are registered in the Go backend.</div>
+        <button class="btn btn-outline" onclick="closeToolsModal()">Close</button>
+      </div>
+    </div>
   </div>
 
   <!-- Save Preset Modal -->

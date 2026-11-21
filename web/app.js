@@ -28,6 +28,14 @@ const conversationHistory = {
   compareB: [],
 };
 
+let availableTools = [];
+const enabledToolsByView = {
+  single: [],
+  compare: [],
+  channel: [],
+};
+let activeToolsModalView = null;
+
 function getCompareOutputElement(mode) {
   if (mode === 'compareA') return document.getElementById('output-a');
   if (mode === 'compareB') return document.getElementById('output-b');
@@ -70,6 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
   checkStatus();
   fetchModels();
   fetchPresets();
+  fetchTools();
   setupKeyboardShortcuts();
   setupSystemPromptCharCounter();
   setupChannelFeedScroll();
@@ -661,18 +670,22 @@ async function runSingleTest() {
   let assistantReply = '';
 
   try {
+    const enabledToolNames = getEnabledToolsForView('single');
+    const requestBody = {
+      model,
+      system_prompt: systemPrompt,
+      user_prompt: userPrompt,
+      history: getContextHistory('single', keepContext),
+      think: singleThink,
+      keep_alive: singleKeepAlive,
+      options,
+    };
+    if (enabledToolNames.length > 0) requestBody.enabled_tools = enabledToolNames;
+
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        system_prompt: systemPrompt,
-        user_prompt: userPrompt,
-        history: getContextHistory('single', keepContext),
-        think: singleThink,
-        keep_alive: singleKeepAlive,
-        options,
-      }),
+      body: JSON.stringify(requestBody),
       signal: controller.signal,
     });
 
@@ -697,6 +710,11 @@ async function runSingleTest() {
         const jsonStr = line.slice(6);
         try {
           const chunk = JSON.parse(jsonStr);
+          if (chunk.type === 'tool_call' || chunk.type === 'tool_result' || chunk.type === 'tool_error') {
+            renderToolEvent(rendererTarget, chunk);
+            outputEl.scrollTop = outputEl.scrollHeight;
+            continue;
+          }
           if (chunk.error) {
             renderer.error(chunk.error);
           } else {
@@ -818,8 +836,10 @@ async function runCompareTest() {
   document.getElementById('stream-badge-a').classList.remove('hidden');
   document.getElementById('stream-badge-b').classList.remove('hidden');
 
+  const compareEnabledTools = getEnabledToolsForView('compare');
+
   // Spawn two parallel streams
-  const pA = runStream('compareA', 'output-a', 'stream-badge-a', 'metric-speed-a', 'metric-ttft-a', 'metric-tokens-a', {
+  const payloadA = {
     model: modelA,
     system_prompt: sysA,
     user_prompt: userPrompt,
@@ -827,9 +847,8 @@ async function runCompareTest() {
     think: thinkA,
     keep_alive: keepAliveA,
     options: { num_ctx: ctxA, num_predict: predA, temperature: tempA },
-  }, keepContextA, 'Candidate A');
-
-  const pB = runStream('compareB', 'output-b', 'stream-badge-b', 'metric-speed-b', 'metric-ttft-b', 'metric-tokens-b', {
+  };
+  const payloadB = {
     model: modelB,
     system_prompt: sysB,
     user_prompt: userPrompt,
@@ -837,7 +856,14 @@ async function runCompareTest() {
     think: thinkB,
     keep_alive: keepAliveB,
     options: { num_ctx: ctxB, num_predict: predB, temperature: tempB },
-  }, keepContextB, 'Candidate B');
+  };
+  if (compareEnabledTools.length > 0) {
+    payloadA.enabled_tools = compareEnabledTools;
+    payloadB.enabled_tools = compareEnabledTools;
+  }
+
+  const pA = runStream('compareA', 'output-a', 'stream-badge-a', 'metric-speed-a', 'metric-ttft-a', 'metric-tokens-a', payloadA, keepContextA, 'Candidate A');
+  const pB = runStream('compareB', 'output-b', 'stream-badge-b', 'metric-speed-b', 'metric-ttft-b', 'metric-tokens-b', payloadB, keepContextB, 'Candidate B');
 
   await Promise.allSettled([pA, pB]);
 
@@ -857,6 +883,7 @@ async function runStream(slotKey, outputId, badgeId, speedId, ttftId, tokensId, 
 
   let renderer;
   let turnMetaEl = null;
+  let turnBodyEl = null;
   let assistantReply = '';
 
   if (keepContext) {
@@ -889,9 +916,9 @@ async function runStream(slotKey, outputId, badgeId, speedId, ttftId, tokensId, 
     `;
     outputEl.appendChild(assistantTurn);
 
-    const turnBody = document.getElementById(`compare-turn-body-${turnId}`);
+    turnBodyEl = document.getElementById(`compare-turn-body-${turnId}`);
     turnMetaEl = document.getElementById(`compare-turn-meta-${turnId}`);
-    renderer = new StreamRenderer(turnBody, false);
+    renderer = new StreamRenderer(turnBodyEl, false);
     outputEl.scrollTop = outputEl.scrollHeight;
   } else {
     outputEl.innerHTML = '';
@@ -926,6 +953,12 @@ async function runStream(slotKey, outputId, badgeId, speedId, ttftId, tokensId, 
         if (!line.startsWith('data: ')) continue;
         try {
           const chunk = JSON.parse(line.slice(6));
+          if (chunk.type === 'tool_call' || chunk.type === 'tool_result' || chunk.type === 'tool_error') {
+            const toolTarget = turnBodyEl || outputEl;
+            renderToolEvent(toolTarget, chunk);
+            outputEl.scrollTop = outputEl.scrollHeight;
+            continue;
+          }
           if (chunk.error) {
             renderer.error(chunk.error);
           } else {
@@ -1067,6 +1100,162 @@ async function confirmSavePreset() {
 }
 
 // ========================================================
+// TOOLS: registry/config/modal + SSE tool events
+// ========================================================
+async function fetchTools() {
+  try {
+    const res = await fetch('/api/tools');
+    if (!res.ok) throw new Error(`Failed to fetch tools (${res.status})`);
+    const data = await res.json();
+    availableTools = Array.isArray(data) ? data : (Array.isArray(data.tools) ? data.tools : []);
+  } catch (err) {
+    console.warn('Failed to load tools:', err);
+    availableTools = [];
+  }
+  updateToolsCountBadges();
+  if (activeToolsModalView) renderToolsModal(activeToolsModalView);
+}
+
+function getEnabledToolsForView(view) {
+  const names = enabledToolsByView[view] || [];
+  const availableNames = new Set(availableTools.map(t => t.function?.name || t.name).filter(Boolean));
+  return names.filter(n => availableNames.has(n));
+}
+
+function updateToolsCountBadges() {
+  const counts = {
+    single: getEnabledToolsForView('single').length,
+    compare: getEnabledToolsForView('compare').length,
+    channel: getEnabledToolsForView('channel').length,
+  };
+  const singleEl = document.getElementById('single-tools-count');
+  const compareEl = document.getElementById('compare-tools-count');
+  if (singleEl) singleEl.textContent = `${counts.single} enabled`;
+  if (compareEl) compareEl.textContent = `${counts.compare} tool${counts.compare !== 1 ? 's' : ''}`;
+  const channelBtn = document.querySelector('button[onclick="openToolsModal(\'channel\')"]');
+  if (channelBtn) channelBtn.textContent = counts.channel > 0 ? `🛠️ Tools (${counts.channel})` : '🛠️ Tools';
+}
+
+function openToolsModal(view) {
+  activeToolsModalView = view;
+  const modal = document.getElementById('tools-modal');
+  const scope = document.getElementById('tools-modal-scope');
+  const labels = { single: 'Single Test', compare: 'A/B Compare', channel: 'Channel' };
+  if (scope) scope.textContent = `${labels[view] || view} view — enabled tools apply to all agents/requests in this view`;
+  renderToolsModal(view);
+  modal?.classList.remove('hidden');
+}
+
+function closeToolsModal() {
+  document.getElementById('tools-modal')?.classList.add('hidden');
+  activeToolsModalView = null;
+}
+
+function renderToolsModal(view) {
+  const availableList = document.getElementById('tools-available-list');
+  const enabledList = document.getElementById('tools-enabled-list');
+  if (!availableList || !enabledList) return;
+
+  const enabledNames = getEnabledToolsForView(view);
+  const enabledSet = new Set(enabledNames);
+  const allDefs = availableTools.map(t => ({
+    name: t.function?.name || t.name,
+    description: t.function?.description || t.description || '',
+  })).filter(t => t.name);
+
+  const availableDefs = allDefs.filter(t => !enabledSet.has(t.name));
+  const enabledDefs = enabledNames.map(name => allDefs.find(t => t.name === name)).filter(Boolean);
+
+  availableList.innerHTML = availableDefs.length ? availableDefs.map(t => toolListItemHTML(t, 'available')).join('')
+    : '<div class="tools-empty">No available tools</div>';
+  enabledList.innerHTML = enabledDefs.length ? enabledDefs.map(t => toolListItemHTML(t, 'enabled')).join('')
+    : '<div class="tools-empty">No tools enabled</div>';
+
+  const aCount = document.getElementById('tools-available-count');
+  const eCount = document.getElementById('tools-enabled-count');
+  if (aCount) aCount.textContent = String(availableDefs.length);
+  if (eCount) eCount.textContent = String(enabledDefs.length);
+}
+
+function toolListItemHTML(tool, pane) {
+  const safeName = escapeHtml(tool.name);
+  const safeDesc = escapeHtml(tool.description || 'No description');
+  return `
+    <label class="tool-list-item">
+      <input type="checkbox" class="tool-select-checkbox" data-pane="${pane}" data-tool-name="${safeName}">
+      <div class="tool-list-item-body">
+        <div class="tool-list-item-name">${safeName}</div>
+        <div class="tool-list-item-desc">${safeDesc}</div>
+      </div>
+    </label>
+  `;
+}
+
+function moveSelectedTools(direction) {
+  const view = activeToolsModalView;
+  if (!view) return;
+  const pane = direction === 'enable' ? 'available' : 'enabled';
+  const selected = Array.from(document.querySelectorAll(`.tool-select-checkbox[data-pane="${pane}"]:checked`))
+    .map(cb => cb.dataset.toolName);
+  if (selected.length === 0) return;
+
+  const current = getEnabledToolsForView(view);
+  const set = new Set(current);
+  if (direction === 'enable') selected.forEach(n => set.add(n));
+  else selected.forEach(n => set.delete(n));
+  enabledToolsByView[view] = Array.from(set);
+  updateToolsCountBadges();
+  renderToolsModal(view);
+}
+
+function moveAllTools(direction) {
+  const view = activeToolsModalView;
+  if (!view) return;
+  const allNames = availableTools.map(t => t.function?.name || t.name).filter(Boolean);
+  enabledToolsByView[view] = direction === 'enable' ? [...allNames] : [];
+  updateToolsCountBadges();
+  renderToolsModal(view);
+}
+
+function renderToolEvent(container, chunk) {
+  const event = document.createElement('div');
+  const kind = chunk.type || 'tool_call';
+  event.className = `tool-event tool-event-${kind}`;
+  const name = escapeHtml(chunk.name || chunk.tool_name || 'tool');
+  if (kind === 'tool_call') {
+    const args = chunk.arguments ? escapeHtml(typeof chunk.arguments === 'string' ? chunk.arguments : JSON.stringify(chunk.arguments, null, 2)) : '';
+    event.innerHTML = `<div class="tool-event-title">🛠️ Tool call: ${name}</div>${args ? `<pre class="tool-event-pre">${args}</pre>` : ''}`;
+  } else if (kind === 'tool_result') {
+    const content = escapeHtml(chunk.content || '');
+    event.innerHTML = `<div class="tool-event-title">✅ Tool result: ${name}</div>${content ? `<pre class="tool-event-pre">${content}</pre>` : '<div class="tool-event-pre">(empty result)</div>'}`;
+  } else {
+    const err = escapeHtml(chunk.error || chunk.content || 'Tool error');
+    event.innerHTML = `<div class="tool-event-title">⚠️ Tool error: ${name}</div><pre class="tool-event-pre">${err}</pre>`;
+  }
+  const finalResponse = container.querySelector('.final-response');
+  if (finalResponse) {
+    container.insertBefore(event, finalResponse);
+  } else {
+    container.appendChild(event);
+  }
+  container.scrollTop = container.scrollHeight;
+}
+
+function handleStreamChunk(chunk, renderer, outputEl, assistantReplyRef) {
+  if (chunk.type === 'tool_call' || chunk.type === 'tool_result' || chunk.type === 'tool_error') {
+    renderToolEvent(outputEl, chunk);
+    return false;
+  }
+  if (chunk.error) {
+    renderer.error(chunk.error);
+  } else {
+    renderer.append(chunk.delta, chunk.thinking);
+    if (assistantReplyRef && chunk.delta) assistantReplyRef.value += chunk.delta;
+  }
+  return Boolean(chunk.done && chunk.metrics);
+}
+
+// ========================================================
 // CHANNEL MODE: Multi-Agent Collaborative Discussion
 // ========================================================
 let channelHistory = [];
@@ -1105,6 +1294,10 @@ function getAllAgents() {
     const nameInput = card.querySelector('.agent-name-input');
     const promptArea = card.querySelector('.agent-textarea');
     const modelSelect = card.querySelector('.agent-model-select');
+    const ctxInput = card.querySelector(`#agent${id}-ctx`) || card.querySelector('.agent-ctx-input');
+    const predictInput = card.querySelector(`#agent${id}-predict`) || card.querySelector('.agent-predict-input');
+    const parsedCtx = parseInt(ctxInput?.value, 10);
+    const parsedPredict = parseInt(predictInput?.value, 10);
     const colorNum = ((id - 1) % 5) + 1;
 
     agents.push({
@@ -1113,6 +1306,8 @@ function getAllAgents() {
       name: nameInput?.value.trim() || `Agent ${id}`,
       prompt: promptArea?.value.trim() || '',
       model: modelSelect?.value || baseModel,
+      numCtx: Number.isFinite(parsedCtx) && parsedCtx > 0 ? parsedCtx : 4096,
+      numPredict: Number.isFinite(parsedPredict) && (parsedPredict === -1 || parsedPredict > 0) ? parsedPredict : 1024,
       enabled: isEnabled,
       cardClass: `agent-${colorNum}-card`,
       pillClass: `pill-agent-${colorNum}`,
@@ -1172,6 +1367,10 @@ function addNewAgent() {
         <button type="button" class="agent-delete-btn" onclick="removeAgent(${nextId})" title="Remove Agent">✕</button>
       </div>
     </div>
+    <div class="agent-params-row">
+      <label class="agent-param" title="Context window for Agent ${nextId}">ctx <input type="number" id="agent${nextId}-ctx" class="mini-input agent-param-input" value="4096" min="512" step="512"></label>
+      <label class="agent-param" title="Max output tokens for Agent ${nextId} (-1 = unlimited)">predict <input type="number" id="agent${nextId}-predict" class="mini-input agent-param-input" value="1024" min="-1" step="128"></label>
+    </div>
     <textarea id="agent${nextId}-prompt" class="prompt-textarea agent-textarea" rows="3" placeholder="Agent ${nextId} System Prompt...">You are Agent ${nextId}. Contribute your unique perspective to the channel discussion constructively.</textarea>
   `;
 
@@ -1203,6 +1402,13 @@ function setChannelRounds(n) {
   updateChannelRoundInfo();
 }
 
+function getChannelHistoryWindow() {
+  const raw = document.getElementById('channel-history-window')?.value;
+  if (!raw || raw === 'all') return 0;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 function updateChannelRoundInfo() {
   const rounds = parseInt(document.getElementById('channel-rounds')?.value, 10) || 1;
   const order = document.getElementById('channel-order')?.value || 'forward';
@@ -1210,11 +1416,13 @@ function updateChannelRoundInfo() {
   if (!infoEl) return;
 
   const enabled = getEnabledAgents();
+  const windowSize = getChannelHistoryWindow();
   let orderName = 'Forward';
   if (order === 'reverse') orderName = 'Reverse';
   else if (order === 'random') orderName = 'Random (No Repeat 1st)';
+  const historyName = windowSize > 0 ? `Last ${windowSize} msgs` : 'All history';
 
-  infoEl.textContent = `${rounds} cycle${rounds > 1 ? 's' : ''} • ${enabled.length} Active Agent${enabled.length !== 1 ? 's' : ''} • ${orderName}`;
+  infoEl.textContent = `${rounds} cycle${rounds > 1 ? 's' : ''} • ${enabled.length} Active Agent${enabled.length !== 1 ? 's' : ''} • ${orderName} • ${historyName}`;
 }
 
 function toggleAgentsPanel() {
@@ -1424,9 +1632,11 @@ async function runChannelDiscussion() {
         const metricsEl = document.getElementById(`${turnMsgId}-metrics`);
         const renderer = new StreamRenderer(cardBody, false);
 
-        // Build History for this agent
+        // Build History for this agent (sliding window applied)
+        const historyWindow = getChannelHistoryWindow();
+        const sourceHistory = historyWindow > 0 ? channelHistory.slice(-historyWindow) : channelHistory;
         const historyPayload = [];
-        for (const item of channelHistory) {
+        for (const item of sourceHistory) {
           if (item.sender === 'user') {
             historyPayload.push({
               role: 'user',
@@ -1452,17 +1662,27 @@ async function runChannelDiscussion() {
         let assistantReply = '';
 
         try {
+          const enabledToolNames = getEnabledToolsForView('channel');
+          const requestBody = {
+            model: agent.model,
+            system_prompt: agent.prompt + '\n\n(You are participating in a multi-agent discussion channel with the user and other agents. Address the discussion naturally, building upon, analyzing, or respectfully challenging the previous responses.)',
+            user_prompt: '',
+            history: historyPayload,
+            think: think,
+            keep_alive: keepAlive,
+            options: {
+              num_ctx: agent.numCtx,
+              num_predict: agent.numPredict,
+            },
+          };
+          if (enabledToolNames.length > 0) {
+            requestBody.enabled_tools = enabledToolNames;
+          }
+
           const response = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              model: agent.model,
-              system_prompt: agent.prompt + '\n\n(You are participating in a multi-agent discussion channel with the user and other agents. Address the discussion naturally, building upon, analyzing, or respectfully challenging the previous responses.)',
-              user_prompt: '',
-              history: historyPayload,
-              think: think,
-              keep_alive: keepAlive,
-            }),
+            body: JSON.stringify(requestBody),
             signal: controller.signal,
           });
 
@@ -1486,6 +1706,11 @@ async function runChannelDiscussion() {
               if (!line.startsWith('data: ')) continue;
               try {
                 const chunk = JSON.parse(line.slice(6));
+                if (chunk.type === 'tool_call' || chunk.type === 'tool_result' || chunk.type === 'tool_error') {
+                  renderToolEvent(cardBody, chunk);
+                  chatFeed.scrollTop = chatFeed.scrollHeight;
+                  continue;
+                }
                 if (chunk.error) {
                   renderer.error(chunk.error);
                 } else {

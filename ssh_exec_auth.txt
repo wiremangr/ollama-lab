@@ -1,0 +1,7 @@
+# Approved SSH targets for ssh_exec tool.
+# Add one IP address or hostname per line.
+# Examples:
+# 192.168.1.10
+# server.example.com
+# user@192.168.1.10
+#

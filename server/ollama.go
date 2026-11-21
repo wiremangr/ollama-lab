@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"ollama-lab/tools"
 )
 
 type OllamaClient struct {
@@ -111,19 +113,33 @@ type OllamaOptions struct {
 	Stop             []string `json:"stop,omitempty"`
 }
 
+type ToolCallFunction struct {
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments,omitempty"`
+}
+
+type ToolCall struct {
+	ID       string           `json:"id,omitempty"`
+	Type     string           `json:"type,omitempty"`
+	Function ToolCallFunction `json:"function"`
+}
+
 type ChatMessage struct {
-	Role     string `json:"role"`
-	Content  string `json:"content"`
-	Thinking string `json:"thinking,omitempty"`
+	Role      string     `json:"role"`
+	Content   string     `json:"content"`
+	Thinking  string     `json:"thinking,omitempty"`
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	ToolName  string     `json:"tool_name,omitempty"`
 }
 
 type ChatRequest struct {
-	Model     string         `json:"model"`
-	Messages  []ChatMessage  `json:"messages"`
-	Stream    bool           `json:"stream"`
-	Think     *bool          `json:"think,omitempty"`
-	KeepAlive any            `json:"keep_alive,omitempty"`
-	Options   *OllamaOptions `json:"options,omitempty"`
+	Model     string           `json:"model"`
+	Messages  []ChatMessage    `json:"messages"`
+	Stream    bool             `json:"stream"`
+	Think     *bool            `json:"think,omitempty"`
+	KeepAlive any              `json:"keep_alive,omitempty"`
+	Options   *OllamaOptions   `json:"options,omitempty"`
+	Tools     []tools.Definition `json:"tools,omitempty"`
 }
 
 type ChatResponseChunk struct {
@@ -143,7 +159,11 @@ type ChatResponseChunk struct {
 }
 
 type ClientChunk struct {
-	Delta      string             `json:"delta"`
+	Type       string             `json:"type,omitempty"`
+	Name       string             `json:"name,omitempty"`
+	Arguments  any                `json:"arguments,omitempty"`
+	Content    string             `json:"content,omitempty"`
+	Delta      string             `json:"delta,omitempty"`
 	Thinking   string             `json:"thinking,omitempty"`
 	Done       bool               `json:"done"`
 	DoneReason string             `json:"done_reason,omitempty"`
@@ -163,32 +183,33 @@ type GenerationMetrics struct {
 	TimeToFirstTokMs float64 `json:"time_to_first_token_ms"`
 }
 
-func (c *OllamaClient) StreamChat(ctx context.Context, chatReq *ChatRequest, onChunk func(chunk ClientChunk) error) error {
+func (c *OllamaClient) StreamChat(ctx context.Context, chatReq *ChatRequest, onChunk func(chunk ClientChunk) error) (*ChatMessage, *GenerationMetrics, error) {
 	chatReq.Stream = true
 	reqBody, err := json.Marshal(chatReq)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/api/chat", bytes.NewReader(reqBody))
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	startTime := time.Now()
 	var firstTokenTime time.Time
 	gotFirstToken := false
+	assistant := ChatMessage{Role: "assistant"}
 
 	resp, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("ollama API error (%d): %s", resp.StatusCode, string(body))
+		return nil, nil, fmt.Errorf("ollama API error (%d): %s", resp.StatusCode, string(body))
 	}
 
 	reader := bufio.NewReader(resp.Body)
@@ -197,9 +218,19 @@ func (c *OllamaClient) StreamChat(ctx context.Context, chatReq *ChatRequest, onC
 		if len(line) > 0 {
 			var chunk ChatResponseChunk
 			if jsonErr := json.Unmarshal(line, &chunk); jsonErr == nil {
-				if !gotFirstToken && (chunk.Message.Content != "" || chunk.Message.Thinking != "") {
+				if !gotFirstToken && (chunk.Message.Content != "" || chunk.Message.Thinking != "" || len(chunk.Message.ToolCalls) > 0) {
 					gotFirstToken = true
 					firstTokenTime = time.Now()
+				}
+
+				if chunk.Message.Content != "" {
+					assistant.Content += chunk.Message.Content
+				}
+				if chunk.Message.Thinking != "" {
+					assistant.Thinking += chunk.Message.Thinking
+				}
+				if len(chunk.Message.ToolCalls) > 0 {
+					assistant.ToolCalls = mergeToolCalls(assistant.ToolCalls, chunk.Message.ToolCalls)
 				}
 
 				if chunk.Done {
@@ -230,21 +261,34 @@ func (c *OllamaClient) StreamChat(ctx context.Context, chatReq *ChatRequest, onC
 						TimeToFirstTokMs: ttft,
 					}
 
-					return onChunk(ClientChunk{
-						Delta:      chunk.Message.Content,
-						Thinking:   chunk.Message.Thinking,
-						Done:       true,
-						DoneReason: chunk.DoneReason,
-						Metrics:    metrics,
-					})
-				} else {
-					if err := onChunk(ClientChunk{
-						Delta:    chunk.Message.Content,
-						Thinking: chunk.Message.Thinking,
-						Done:     false,
-					}); err != nil {
-						return err
+					if len(assistant.ToolCalls) == 0 {
+						if err := onChunk(ClientChunk{
+							Delta:      chunk.Message.Content,
+							Thinking:   chunk.Message.Thinking,
+							Done:       true,
+							DoneReason: chunk.DoneReason,
+							Metrics:    metrics,
+						}); err != nil {
+							return &assistant, metrics, err
+						}
+					} else if chunk.Message.Content != "" || chunk.Message.Thinking != "" {
+						if err := onChunk(ClientChunk{
+							Delta:    chunk.Message.Content,
+							Thinking: chunk.Message.Thinking,
+							Done:     false,
+						}); err != nil {
+							return &assistant, metrics, err
+						}
 					}
+					return &assistant, metrics, nil
+				}
+
+				if err := onChunk(ClientChunk{
+					Delta:    chunk.Message.Content,
+					Thinking: chunk.Message.Thinking,
+					Done:     false,
+				}); err != nil {
+					return &assistant, nil, err
 				}
 			}
 		}
@@ -253,9 +297,38 @@ func (c *OllamaClient) StreamChat(ctx context.Context, chatReq *ChatRequest, onC
 			if err == io.EOF {
 				break
 			}
-			return err
+			return &assistant, nil, err
 		}
 	}
 
-	return nil
+	return &assistant, nil, nil
+}
+
+func mergeToolCalls(existing, incoming []ToolCall) []ToolCall {
+	if len(existing) == 0 {
+		out := make([]ToolCall, len(incoming))
+		copy(out, incoming)
+		return out
+	}
+	out := make([]ToolCall, len(existing))
+	copy(out, existing)
+	for i, call := range incoming {
+		if i < len(out) {
+			if call.ID != "" {
+				out[i].ID = call.ID
+			}
+			if call.Type != "" {
+				out[i].Type = call.Type
+			}
+			if call.Function.Name != "" {
+				out[i].Function.Name = call.Function.Name
+			}
+			if len(call.Function.Arguments) > 0 {
+				out[i].Function.Arguments = call.Function.Arguments
+			}
+		} else {
+			out = append(out, call)
+		}
+	}
+	return out
 }

@@ -38,14 +38,22 @@ A standalone, lightweight macOS desktop application written in Go for testing lo
 8. Channel Mode (Collaborative Multi-Agent Discussion):
   ⚬ Unified environment featuring 3 AI Agents discussing, analyzing, and interacting with each other and the user in a shared channel.
   ⚬ Model Selection: Global channel model with per-agent override capabilities.
+  ⚬ Per-Agent Parameters: Configure `num_ctx` and `num_predict` individually for each agent.
   ⚬ Customized System Prompts: Distinct roles per agent (e.g., Debate with Visionary / Skeptic / Pragmatist, Code Architecture Team, or Dialectical Reasoning).
   ⚬ Shared History & Visibility: Every user message and agent response is injected into the context, instantly visible to all subsequent agents.
+  ⚬ Sliding History Window: Configure how many recent channel messages are sent to agents (`All`, `Last 6`, `Last 10`, `Last 20`, `Last 40`).
   ⚬ Round Configuration: Set conversation cycles (1, 2, 3+ rounds) after which execution automatically pauses for user input.
   ⚬ Turn Order Control:
     ⚬ 1 ➔ 2 ➔ 3 (First to Third)
     ⚬ 3 ➔ 2 ➔ 1 (Third to First)
     ⚬ 🎲 Random (Randomized order ensuring the agent that spoke first in the current round never speaks first in the next round).
-9. Zero External Bloat:
+9. Tool Calling (All Views):
+  ⚬ Configure enabled tools per view in Single, A/B Compare, and Channel via a Tools modal (Available / Enabled).
+  ⚬ Backend tool registry in `tools/` with `GET /api/tools` and server-side tool execution loop during chat streaming.
+  ⚬ SSE tool events (`tool_call`, `tool_result`, `tool_error`) are displayed in the UI.
+  ⚬ Built-in tools: `get_current_time`, `ping`, `dns_lookup`, `web_page_fetch`, `connection_test`, `ssh_exec` (uses local `ssh`; authorized targets via `ssh_exec_auth.txt` or env var; explicit confirmation required). Add your own tools in the `tools/` directory.
+
+10. Zero External Bloat:
   ⚬ Built using only the Go Standard Library (net/http, embed, encoding/json) and native macOS Cocoa/WebKit frameworks.
 
 🚀 How to Run
@@ -85,15 +93,65 @@ Or a simple binary build:
 go build -o ollama-lab .
 
 
+🔧 Adding Tools
+
+Tools are registered in the project-root `tools/` directory and automatically exposed to the UI via `GET /api/tools`.
+
+1. Create a new file in `tools/`, e.g. `tools/my_tool.go`:
+
+```go
+package tools
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+)
+
+func registerMyTool(r *Registry) {
+	_ = r.Register(Definition{
+		Type: "function",
+		Function: Function{
+			Name:        "my_tool",
+			Description: "Describe what the tool does.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"input": map[string]any{"type": "string", "description": "Example input"},
+				},
+				"required": []string{"input"},
+			},
+		},
+	}, func(ctx context.Context, args json.RawMessage) (string, error) {
+		var in struct {
+			Input string `json:"input"`
+		}
+		if err := json.Unmarshal(args, &in); err != nil {
+			return "", fmt.Errorf("invalid args: %w", err)
+		}
+
+		out, _ := json.Marshal(map[string]any{"result": in.Input})
+		return string(out), nil
+	})
+}
+```
+
+2. Register it in `tools/registry.go`:
+
+```go
+func (r *Registry) registerBuiltins() {
+	registerGetCurrentTime(r)
+	registerMyTool(r)
+}
+```
+
+3. Rebuild the app:
+
+```bash
+./build-app.sh
+```
+
 💡 Keyboard Shortcuts
-
-
 
 ⚬ ⌘ + Enter: Instant prompt execution.
 ⚬ Escape: Immediate stream interruption / Stop.
-
-<img width="1392" height="994" alt="Single" src="https://github.com/user-attachments/assets/05801eb0-6f88-4f0d-abcb-04f1a65e9399" />
-
-<img width="1392" height="994" alt="AB-Compare" src="https://github.com/user-attachments/assets/da67d96a-34ee-451f-8742-3762f4aaacba" />
-
-<img width="1392" height="994" alt="Channel" src="https://github.com/user-attachments/assets/76249331-07a9-4a3b-95ee-58c6295b2f63" />
