@@ -155,3 +155,7 @@ func (r *Registry) registerBuiltins() {
 
 ⚬ ⌘ + Enter: Instant prompt execution.
 ⚬ Escape: Immediate stream interruption / Stop.
+<img width="1397" height="1063" alt="Single" src="https://github.com/user-attachments/assets/5a4021a0-d64b-4428-9416-202bdb960013" />
+<img width="1397" height="1063" alt="Channel" src="https://github.com/user-attachments/assets/5af69095-128c-4b59-9dc4-88b72af8156a" />
+<img width="1397" height="1063" alt="A-B" src="https://github.com/user-attachments/assets/8245d342-4144-4c82-bbd8-6da6331214dc" />
+
