@@ -109,4 +109,8 @@ func (r *Registry) registerBuiltins() {
 	registerWebPageFetch(r)
 	registerConnectionTest(r)
 	registerSSHExec(r)
+	registerTCPClient(r)
+	registerTLSClient(r)
+	registerFileRead(r)
+	registerFileWrite(r)
 }

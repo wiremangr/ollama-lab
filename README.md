@@ -51,7 +51,7 @@ A standalone, lightweight macOS desktop application written in Go for testing lo
   ⚬ Configure enabled tools per view in Single, A/B Compare, and Channel via a Tools modal (Available / Enabled).
   ⚬ Backend tool registry in `tools/` with `GET /api/tools` and server-side tool execution loop during chat streaming.
   ⚬ SSE tool events (`tool_call`, `tool_result`, `tool_error`) are displayed in the UI.
-  ⚬ Built-in tools: `get_current_time`, `ping`, `dns_lookup`, `web_page_fetch`, `connection_test`, `ssh_exec` (uses local `ssh`; authorized targets via `ssh_exec_auth.txt` or env var; explicit confirmation required). Add your own tools in the `tools/` directory.
+  ⚬ Built-in tools: `get_current_time`, `ping`, `dns_lookup`, `web_page_fetch`, `connection_test`, `ssh_exec` (uses local `ssh`; authorized targets via `ssh_exec_auth.txt` or env var; explicit confirmation required), `tcp_client`, `tls_client` (session-based interactive TCP/TLS with `connect/send/recv/close`, `max_bytes`, optional `read_until`; TLS supports `insecure_skip_verify` with explicit confirmation), `file_read`, and `file_write`. Add your own tools in the `tools/` directory.
 
 10. Zero External Bloat:
   ⚬ Built using only the Go Standard Library (net/http, embed, encoding/json) and native macOS Cocoa/WebKit frameworks.

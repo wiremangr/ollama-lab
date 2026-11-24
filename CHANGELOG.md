@@ -23,6 +23,8 @@
   - Improved `web_page_fetch`: extracts title/headings/readable text/links, removes scripts/styles/nav/footer/irrelevant markup, returns structured JSON, applies size limits and truncation metadata, reports JS-heavy/low-extraction cases, and preserves timeout handling with SSRF protections (private/loopback/metadata blocking and redirect validation).
   - Hardened `ssh_exec`: clearer model-facing schema/description, explicit `confirm` gate before remote execution, authorized targets via `ssh_exec_auth.txt` (one IP/hostname per line, reloaded each call; checked in cwd, executable dir, and .app bundle parent dir) and/or `OLLAMA_LAB_SSH_ALLOWED_TARGETS`, private IPs allowed when authorized, and separate `stdout`, `stderr`, and `exit_code` results. Created `ssh_exec_auth.txt` template in project root.
   - Added tests: `tools/dns_lookup_test.go`, `tools/web_page_fetch_test.go`.
+  - Added `tcp_client` and `tls_client` tools: session-based interactive TCP/TLS clients (`connect/send/recv/close`) with `session_id`, `max_bytes`, timeout, optional `read_until`, utf8/base64 encoding; TLS supports SNI, `insecure_skip_verify`, and explicit `confirm_insecure` confirmation gate.
+  - Added `file_read` and `file_write` tools for local filesystem access (utf8/base64, read offset/max_bytes, write overwrite/append/create_dirs).
 
 - **Tools configuration UI (Single, A/B Compare, Channel)**
   - Added a Tools modal with dual-pane management: Available Tools / Enabled Tools.
